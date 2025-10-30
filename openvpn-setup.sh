@@ -10,9 +10,40 @@ echo "Updating system packages..."
 apt-get update
 apt-get upgrade -y
 
-# Install OpenVPN and Easy-RSA
-echo "Installing OpenVPN and Easy-RSA..."
-apt-get install -y openvpn easy-rsa
+# Install OpenVPN, Easy-RSA, Nginx and htpasswd utilities
+echo "Installing OpenVPN, Easy-RSA, Nginx and utilities..."
+apt-get install -y openvpn easy-rsa nginx apache2-utils
+
+# Prepare download directory for exporting client configs
+mkdir -p /var/www/ovpn-export
+chown root:www-data /var/www/ovpn-export
+chmod 750 /var/www/ovpn-export
+
+# Configure Nginx site for protected downloads
+cat > /etc/nginx/sites-available/ovpn << 'EOF'
+server {
+    listen 80;
+    server_name _;
+
+    # Redirect root to /download/
+    location = / { return 302 /download/; }
+
+    # Protected download path: /download/<username>/<file>.ovpn
+    location ~ ^/download/([^/]+)/(.+\.ovpn)$ {
+        alias /var/www/ovpn-export/$1/$2;
+        auth_basic "Ovpn Download";
+        auth_basic_user_file /etc/nginx/.ovpn_htpasswd;
+        autoindex off;
+        limit_except GET HEAD { deny all; }
+        access_log /var/log/nginx/ovpn_downloads.log;
+    }
+}
+EOF
+
+# Enable site and reload Nginx
+ln -sf /etc/nginx/sites-available/ovpn /etc/nginx/sites-enabled/ovpn
+[ -f /etc/nginx/sites-enabled/default ] && rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx || true
 
 # Create directory for Easy-RSA
 mkdir -p /etc/openvpn/easy-rsa
@@ -197,6 +228,24 @@ CLIENT_EOF
 echo "Client configuration created: /root/$CLIENT_NAME.ovpn"
 echo "Download this file to your client and import it into your OpenVPN client."
 
+# Create or update basic-auth user matching the client name, with random password
+PASSWORD=$(openssl rand -base64 12)
+if [ ! -f /etc/nginx/.ovpn_htpasswd ]; then
+    htpasswd -b -c /etc/nginx/.ovpn_htpasswd "$CLIENT_NAME" "$PASSWORD"
+else
+    htpasswd -b /etc/nginx/.ovpn_htpasswd "$CLIENT_NAME" "$PASSWORD"
+fi
+
+# Export .ovpn file to protected download path under this username
+/root/ovpn-export "$CLIENT_NAME" "$CLIENT_NAME"
+
+echo "==============================================="
+echo "Credenciales de descarga creadas"
+echo "Usuario: $CLIENT_NAME"
+echo "Password: $PASSWORD"
+echo "Link: http://$PUBLIC_IP/download/$CLIENT_NAME/$CLIENT_NAME.ovpn"
+echo "==============================================="
+
 # If the IP wasn't detected, provide instructions
 if [ "$PUBLIC_IP" = "YOUR_SERVER_IP" ]; then
     echo ""
@@ -276,10 +325,67 @@ echo "Download this file to your client and import it into your OpenVPN client."
 chmod 600 /root/$CLIENT_NAME.ovpn
 chmod 600 /etc/openvpn/easy-rsa/pki/private/$CLIENT_NAME.key
 
+# Create or update basic-auth user matching the client name, with random password
+PASSWORD=$(openssl rand -base64 12)
+if [ ! -f /etc/nginx/.ovpn_htpasswd ]; then
+    htpasswd -b -c /etc/nginx/.ovpn_htpasswd "$CLIENT_NAME" "$PASSWORD"
+else
+    htpasswd -b /etc/nginx/.ovpn_htpasswd "$CLIENT_NAME" "$PASSWORD"
+fi
+
+# Export .ovpn file to protected download path under this username
+/root/ovpn-export "$CLIENT_NAME" "$CLIENT_NAME"
+
+echo "==============================================="
+echo "Credenciales de descarga creadas"
+echo "Usuario: $CLIENT_NAME"
+echo "Password: $PASSWORD"
+echo "Link: http://$PUBLIC_IP/download/$CLIENT_NAME/$CLIENT_NAME.ovpn"
+echo "==============================================="
+
 echo "✓ Client setup completed automatically (no passphrases)"
 CLIENT_AUTO_EOF
 
 chmod +x /root/client-setup-auto.sh
+
+# Create export utility to publish .ovpn files under a basic-auth username
+cat > /root/ovpn-export << 'EOF'
+#!/usr/bin/env bash
+
+# usage: /root/ovpn-export <client-name> <username>
+set -euo pipefail
+
+if [ $# -ne 2 ]; then
+  echo "Usage: $0 <client-name> <username>" >&2
+  exit 1
+fi
+
+CLIENT="$1"
+USER_NAME="$2"
+
+SRC="/root/$CLIENT.ovpn"
+DEST_DIR="/var/www/ovpn-export/$USER_NAME"
+DEST="$DEST_DIR/$CLIENT.ovpn"
+
+if [ ! -f "$SRC" ]; then
+  echo "ERROR: $SRC no existe" >&2
+  exit 2
+fi
+
+mkdir -p "$DEST_DIR"
+chown root:www-data "$DEST_DIR"
+chmod 750 "$DEST_DIR"
+
+cp -f "$SRC" "$DEST"
+chown root:www-data "$DEST"
+chmod 640 "$DEST"
+
+PUBLIC_IP=$(curl -s ipinfo.io/ip || echo "<IP_O_DOMINIO>")
+echo "Archivo exportado: /download/$USER_NAME/$CLIENT.ovpn"
+echo "URL: http://$PUBLIC_IP/download/$USER_NAME/$CLIENT.ovpn"
+EOF
+
+chmod +x /root/ovpn-export
 
 # Create management script
 cat > /root/vpn-management.sh << 'EOF'
