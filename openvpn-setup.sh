@@ -208,163 +208,6 @@ EOF
 
 chmod +x /root/client-setup.sh
 
-# Create a script to fix IP addresses in client configs
-cat > /root/fix-client-ip.sh << 'EOF'
-#!/bin/bash
-
-# Script to fix IP addresses in client configuration files
-
-if [ $# -eq 0 ]; then
-    echo "Usage: $0 <client-name> [ip-address]"
-    echo "Example: $0 myclient 54.226.83.251"
-    exit 1
-fi
-
-CLIENT_NAME=$1
-IP_ADDRESS=$(curl ipinfo.io/ip)
-
-if [ ! -f "/root/$CLIENT_NAME.ovpn" ]; then
-    echo "Error: Client configuration file /root/$CLIENT_NAME.ovpn not found"
-    exit 1
-fi
-
-echo "Fixing IP address in /root/$CLIENT_NAME.ovpn..."
-sed -i "s/YOUR_SERVER_IP/$IP_ADDRESS/g" /root/$CLIENT_NAME.ovpn
-sed -i "s/remote .* 1194/remote $IP_ADDRESS 1194/g" /root/$CLIENT_NAME.ovpn
-
-echo "IP address updated to: $IP_ADDRESS"
-echo "Client configuration file updated: /root/$CLIENT_NAME.ovpn"
-EOF
-
-chmod +x /root/fix-client-ip.sh
-
-# Create management script
-cat > /root/vpn-management.sh << 'EOF'
-#!/bin/bash
-
-# OpenVPN Management Script
-
-case "$1" in
-    status)
-        systemctl status openvpn@server
-        ;;
-    start)
-        systemctl start openvpn@server
-        ;;
-    stop)
-        systemctl stop openvpn@server
-        ;;
-    restart)
-        systemctl restart openvpn@server
-        ;;
-    logs)
-        journalctl -u openvpn@server -f
-        ;;
-    clients)
-        echo "Connected clients:"
-        if [ -f "/var/log/openvpn/openvpn-status.log" ]; then
-            cat /var/log/openvpn/openvpn-status.log | grep "CLIENT_LIST"
-        else
-            echo "No status log found. OpenVPN may not be running."
-        fi
-        ;;
-    *)
-        echo "Usage: $0 {status|start|stop|restart|logs|clients}"
-        exit 1
-        ;;
-esac
-EOF
-
-chmod +x /root/vpn-management.sh
-
-# Create a welcome message
-cat > /etc/motd << 'EOF'
-===============================================
-OpenVPN Server Setup Complete
-===============================================
-
-System has been automatically configured with:
-✓ OpenVPN and Easy-RSA installed
-✓ IP forwarding enabled
-✓ Firewall rules configured
-✓ Certificates generated (passwordless)
-✓ OpenVPN service running
-
-AUTOMATED SETUP (Ready to use):
-- Server is already running and ready for clients
-- Use: sudo /root/client-setup-auto.sh <client-name>
-
-DOWNLOAD CLIENT CONFIGS:
-- List clients: sudo /root/download-helper.sh --list
-- SCP command: sudo /root/download-helper.sh --scp <client-name>
-- Web download: sudo /root/download-helper.sh --web
-- All options: sudo /root/download-helper.sh <client-name>
-
-MANUAL INTERVENTION (If needed):
-- For password-protected setup: sudo /root/setup-vpn.sh
-- For manual client creation: sudo /root/client-setup.sh <client-name>
-
-MANAGEMENT:
-- Service control: sudo /root/vpn-management.sh {status|start|stop|restart|logs|clients}
-
-Server IP: $(curl ipinfo.io/ip)
-Port: 1194
-Protocol: UDP
-
-===============================================
-EOF
-
-# Automated OpenVPN setup (passwordless for user data)
-echo "Starting automated OpenVPN setup..."
-cd /etc/openvpn/easy-rsa
-
-# Initialize PKI
-./easyrsa init-pki
-
-# Create vars file for passwordless operation
-cat > /etc/openvpn/easy-rsa/vars << 'VARS_EOF'
-# Easy-RSA configuration for automated deployment
-export KEY_COUNTRY="US"
-export KEY_PROVINCE="CA"
-export KEY_CITY="SanFrancisco"
-export KEY_ORG="MyOrg"
-export KEY_EMAIL="admin@example.com"
-export KEY_OU="MyOrgUnit"
-export KEY_NAME="server"
-export KEY_ALTNAMES="server"
-VARS_EOF
-
-# Source the vars file
-source /etc/openvpn/easy-rsa/vars
-
-# Build CA without passphrase (automated)
-echo "Building CA without passphrase (automated)..."
-./easyrsa --batch build-ca nopass
-
-# Build server certificate without passphrase (automated)
-echo "Building server certificate without passphrase (automated)..."
-./easyrsa --batch build-server-full server nopass
-
-# Generate DH parameters
-echo "Generating Diffie-Hellman parameters..."
-./easyrsa gen-dh
-
-# Generate TLS auth key
-echo "Generating TLS auth key..."
-openvpn --genkey --secret /etc/openvpn/ta.key
-
-# Set proper permissions
-chmod 600 /etc/openvpn/ta.key
-chmod 600 /etc/openvpn/easy-rsa/pki/private/*.key
-chmod 644 /etc/openvpn/easy-rsa/pki/issued/*.crt
-chmod 644 /etc/openvpn/easy-rsa/pki/ca.crt
-chmod 644 /etc/openvpn/easy-rsa/pki/dh.pem
-
-# Start OpenVPN service
-echo "Starting OpenVPN service..."
-systemctl start openvpn@server
-systemctl enable openvpn@server
-
 # Create passwordless client setup script
 cat > /root/client-setup-auto.sh << 'CLIENT_AUTO_EOF'
 #!/bin/bash
@@ -438,268 +281,129 @@ CLIENT_AUTO_EOF
 
 chmod +x /root/client-setup-auto.sh
 
-# Create download helper script
-cat > /root/download-helper.sh << 'DOWNLOAD_EOF'
+# Create management script
+cat > /root/vpn-management.sh << 'EOF'
 #!/bin/bash
 
-# OpenVPN Client Configuration Download Helper
-# This script provides multiple ways to download client configuration files
+# OpenVPN Management Script
 
-set -e
-
-# Function to show usage
-show_usage() {
-    echo "OpenVPN Client Configuration Download Helper"
-    echo "============================================="
-    echo
-    echo "Usage: $0 [OPTIONS] [CLIENT_NAME]"
-    echo
-    echo "Options:"
-    echo "  -l, --list          List all available client configurations"
-    echo "  -s, --scp           Show SCP download command"
-    echo "  -w, --web           Start HTTP server for web download"
-    echo "  -c, --copy          Copy config to web directory"
-    echo "  -h, --help          Show this help message"
-    echo
-    echo "Examples:"
-    echo "  $0 --list                    # List all clients"
-    echo "  $0 --scp myclient           # Show SCP command for myclient"
-    echo "  $0 --web                    # Start HTTP server"
-    echo "  $0 --copy myclient          # Copy myclient config to web dir"
-    echo "  $0 myclient                 # Show all download options for myclient"
-}
-
-# Function to list all client configurations
-list_clients() {
-    echo "Available client configurations:"
-    echo "==============================="
-    
-    if [ -d "/etc/openvpn/easy-rsa/pki/issued" ]; then
-        for cert_file in /etc/openvpn/easy-rsa/pki/issued/*.crt; do
-            if [ -f "$cert_file" ]; then
-                client_name=$(basename "$cert_file" .crt)
-                if [ "$client_name" != "server" ]; then
-                    if [ -f "/root/$client_name.ovpn" ]; then
-                        echo "✓ $client_name (config ready)"
-                    else
-                        echo "✗ $client_name (no config file)"
-                    fi
-                fi
-            fi
-        done
-    else
-        echo "No client certificates found"
-    fi
-}
-
-# Function to show SCP download command
-show_scp_command() {
-    local client_name=$1
-    local server_ip=$(curl -s ipinfo.io/ip)
-    local key_path="your-key.pem"  # User needs to replace this
-    
-    if [ -z "$client_name" ]; then
-        echo "Error: Client name required for SCP command"
-        echo "Usage: $0 --scp <client-name>"
-        return 1
-    fi
-    
-    if [ ! -f "/root/$client_name.ovpn" ]; then
-        echo "Error: Client configuration file not found: /root/$client_name.ovpn"
-        echo "Create it first with: /root/client-setup-auto.sh $client_name"
-        return 1
-    fi
-    
-    echo "SCP Download Command:"
-    echo "===================="
-    echo
-    echo "From your local machine, run:"
-    echo "scp -i $key_path ubuntu@$server_ip:/root/$client_name.ovpn ./"
-    echo
-    echo "Note: Replace '$key_path' with your actual SSH key path"
-    echo "Example: scp -i ~/.ssh/my-key.pem ubuntu@$server_ip:/root/$client_name.ovpn ./"
-}
-
-# Function to start HTTP server
-start_web_server() {
-    local port=8080
-    local web_dir="/var/www/html/openvpn"
-    
-    echo "Starting HTTP server for client configuration downloads..."
-    echo "========================================================="
-    
-    # Create web directory
-    mkdir -p "$web_dir"
-    chmod 755 "$web_dir"
-    
-    # Copy all client configs to web directory
-    echo "Copying client configurations to web directory..."
-    cp /root/*.ovpn "$web_dir/" 2>/dev/null || true
-    
-    # Set proper permissions
-    chmod 644 "$web_dir"/*.ovpn 2>/dev/null || true
-    
-    # Create index page
-    cat > "$web_dir/index.html" << 'HTML_EOF'
-<!DOCTYPE html>
-<html>
-<head>
-    <title>OpenVPN Client Configurations</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .config { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
-        .download { background: #007cba; color: white; padding: 8px 16px; text-decoration: none; border-radius: 3px; }
-        .download:hover { background: #005a87; }
-    </style>
-</head>
-<body>
-    <h1>OpenVPN Client Configurations</h1>
-    <p>Click on a configuration file to download it:</p>
-    
-    <div class="config">
-        <h3>Available Configurations:</h3>
-        <ul>
-HTML_EOF
-
-    # Add client configs to index
-    for config_file in "$web_dir"/*.ovpn; do
-        if [ -f "$config_file" ]; then
-            client_name=$(basename "$config_file" .ovpn)
-            echo "            <li><a href=\"$client_name.ovpn\" class=\"download\">Download $client_name.ovpn</a></li>" >> "$web_dir/index.html"
+case "$1" in
+    status)
+        systemctl status openvpn@server
+        ;;
+    start)
+        systemctl start openvpn@server
+        ;;
+    stop)
+        systemctl stop openvpn@server
+        ;;
+    restart)
+        systemctl restart openvpn@server
+        ;;
+    logs)
+        journalctl -u openvpn@server -f
+        ;;
+    clients)
+        echo "Connected clients:"
+        if [ -f "/var/log/openvpn/openvpn-status.log" ]; then
+            cat /var/log/openvpn/openvpn-status.log | grep "CLIENT_LIST"
+        else
+            echo "No status log found. OpenVPN may not be running."
         fi
-    done
-    
-    cat >> "$web_dir/index.html" << 'HTML_EOF'
-        </ul>
-    </div>
-    
-    <div class="config">
-        <h3>Instructions:</h3>
-        <ol>
-            <li>Download your configuration file</li>
-            <li>Import it into your OpenVPN client</li>
-            <li>Connect to the VPN</li>
-        </ol>
-    </div>
-</body>
-</html>
-HTML_EOF
+        ;;
+    *)
+        echo "Usage: $0 {status|start|stop|restart|logs|clients}"
+        exit 1
+        ;;
+esac
+EOF
 
-    echo "Web server directory: $web_dir"
-    echo "Access via: http://$(curl -s ipinfo.io/ip):$port/openvpn/"
-    echo
-    echo "Starting HTTP server on port $port..."
-    echo "Press Ctrl+C to stop the server"
-    echo
-    
-    # Start Python HTTP server
-    cd "$web_dir"
-    python3 -m http.server "$port"
-}
+chmod +x /root/vpn-management.sh
 
-# Function to copy config to web directory
-copy_to_web() {
-    local client_name=$1
-    local web_dir="/var/www/html/openvpn"
-    
-    if [ -z "$client_name" ]; then
-        echo "Error: Client name required"
-        echo "Usage: $0 --copy <client-name>"
-        return 1
-    fi
-    
-    if [ ! -f "/root/$client_name.ovpn" ]; then
-        echo "Error: Client configuration file not found: /root/$client_name.ovpn"
-        echo "Create it first with: /root/client-setup-auto.sh $client_name"
-        return 1
-    fi
-    
-    # Create web directory
-    mkdir -p "$web_dir"
-    chmod 755 "$web_dir"
-    
-    # Copy config file
-    cp "/root/$client_name.ovpn" "$web_dir/"
-    chmod 644 "$web_dir/$client_name.ovpn"
-    
-    echo "✓ Client configuration copied to web directory"
-    echo "  File: $web_dir/$client_name.ovpn"
-    echo "  Access: http://$(curl -s ipinfo.io/ip):8080/openvpn/$client_name.ovpn"
-}
+# Create a welcome message
+cat > /etc/motd << 'EOF'
+===============================================
+OpenVPN Server Setup Complete
+===============================================
 
-# Function to show all download options for a client
-show_client_options() {
-    local client_name=$1
-    local server_ip=$(curl -s ipinfo.io/ip)
-    
-    if [ -z "$client_name" ]; then
-        echo "Error: Client name required"
-        echo "Usage: $0 <client-name>"
-        return 1
-    fi
-    
-    if [ ! -f "/root/$client_name.ovpn" ]; then
-        echo "Error: Client configuration file not found: /root/$client_name.ovpn"
-        echo "Create it first with: /root/client-setup-auto.sh $client_name"
-        return 1
-    fi
-    
-    echo "Download Options for: $client_name"
-    echo "================================="
-    echo
-    echo "1. SCP Download (Recommended):"
-    echo "   scp -i your-key.pem ubuntu@$server_ip:/root/$client_name.ovpn ./"
-    echo
-    echo "2. HTTP Download:"
-    echo "   First run: $0 --copy $client_name"
-    echo "   Then access: http://$server_ip:8080/openvpn/$client_name.ovpn"
-    echo
-    echo "3. Manual Copy:"
-    echo "   SSH to server and copy the file manually"
-    echo "   ssh -i your-key.pem ubuntu@$server_ip"
-    echo "   sudo cat /root/$client_name.ovpn"
-    echo
-    echo "4. Start Web Server:"
-    echo "   $0 --web"
-    echo "   Then access: http://$server_ip:8080/openvpn/"
-}
+System has been automatically configured with:
+✓ OpenVPN and Easy-RSA installed
+✓ IP forwarding enabled
+✓ Firewall rules configured
+✓ Certificates generated (passwordless)
+✓ OpenVPN service running
 
-# Main function
-main() {
-    case "$1" in
-        -l|--list)
-            list_clients
-            ;;
-        -s|--scp)
-            show_scp_command "$2"
-            ;;
-        -w|--web)
-            start_web_server
-            ;;
-        -c|--copy)
-            copy_to_web "$2"
-            ;;
-        -h|--help)
-            show_usage
-            ;;
-        "")
-            show_usage
-            ;;
-        *)
-            show_client_options "$1"
-            ;;
-    esac
-}
+AUTOMATED SETUP (Ready to use):
+- Server is already running and ready for clients
+- Use: sudo /root/client-setup-auto.sh <client-name>
 
-# Run main function with all arguments
-main "$@"
-DOWNLOAD_EOF
+MANUAL INTERVENTION (If needed):
+- For password-protected setup: sudo /root/setup-vpn.sh
+- For manual client creation: sudo /root/client-setup.sh <client-name>
 
-chmod +x /root/download-helper.sh
+MANAGEMENT:
+- Service control: sudo /root/vpn-management.sh {status|start|stop|restart|logs|clients}
+
+Server IP: $(curl ipinfo.io/ip)
+Port: 1194
+Protocol: UDP
+
+===============================================
+EOF
+
+# Automated OpenVPN setup (passwordless for user data)
+echo "Starting automated OpenVPN setup..."
+cd /etc/openvpn/easy-rsa
+
+# Initialize PKI
+./easyrsa init-pki
+
+# Create vars file for passwordless operation
+cat > /etc/openvpn/easy-rsa/vars << 'VARS_EOF'
+# Easy-RSA configuration for automated deployment
+export KEY_COUNTRY="US"
+export KEY_PROVINCE="CA"
+export KEY_CITY="SanFrancisco"
+export KEY_ORG="MyOrg"
+export KEY_EMAIL="admin@example.com"
+export KEY_OU="MyOrgUnit"
+export KEY_NAME="server"
+export KEY_ALTNAMES="server"
+VARS_EOF
+
+# Source the vars file
+source /etc/openvpn/easy-rsa/vars
+
+# Build CA without passphrase (automated)
+echo "Building CA without passphrase (automated)..."
+./easyrsa --batch build-ca nopass
+
+# Build server certificate without passphrase (automated)
+echo "Building server certificate without passphrase (automated)..."
+./easyrsa --batch build-server-full server nopass
+
+# Generate DH parameters
+echo "Generating Diffie-Hellman parameters..."
+./easyrsa gen-dh
+
+# Generate TLS auth key
+echo "Generating TLS auth key..."
+openvpn --genkey --secret /etc/openvpn/ta.key
+
+# Set proper permissions
+chmod 600 /etc/openvpn/ta.key
+chmod 600 /etc/openvpn/easy-rsa/pki/private/*.key
+chmod 644 /etc/openvpn/easy-rsa/pki/issued/*.crt
+chmod 644 /etc/openvpn/easy-rsa/pki/ca.crt
+chmod 644 /etc/openvpn/easy-rsa/pki/dh.pem
+
+# Start OpenVPN service
+echo "Starting OpenVPN service..."
+systemctl start openvpn@server
+systemctl enable openvpn@server
 
 # Log completion
 echo "OpenVPN server setup completed automatically at $(date)" >> /var/log/openvpn-prep.log
 echo "Server IP: $(curl -s ipinfo.io/ip)" >> /var/log/openvpn-prep.log
 echo "Use /root/client-setup-auto.sh <client-name> for automated client creation" >> /var/log/openvpn-prep.log
 echo "Use /root/setup-vpn.sh for manual setup with password options" >> /var/log/openvpn-prep.log
-
