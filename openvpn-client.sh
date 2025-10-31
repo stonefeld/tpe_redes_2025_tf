@@ -17,7 +17,7 @@ apt-get update
 apt-get upgrade -y
 
 echo "Installing OpenVPN and helpers..."
-apt-get install -y openvpn python3 iptables-persistent || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y openvpn python3 iptables-persistent || true
 
 # Enable IP forwarding (gateway)
 echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
@@ -41,7 +41,7 @@ if [ $# -lt 1 ]; then
 fi
 
 OVPN_FILE="$1"
-REMOTE_CIDR_INPUT="${2:-${REMOTE_CIDR:-10.0.0.0/16}}"
+REMOTE_CIDR_INPUT="$${2:-$${REMOTE_CIDR:-10.0.0.0/16}}"
 
 if [ ! -f "$OVPN_FILE" ]; then
     echo "ERROR: File not found: $OVPN_FILE" >&2
@@ -52,7 +52,7 @@ NAME=$(basename "$OVPN_FILE" .ovpn)
 NAME=$(basename "$NAME" .conf)
 
 # Ensure route to remote site (LAN A) is included for site-to-site
-NET="${REMOTE_CIDR_INPUT%/*}"
+NET="$${REMOTE_CIDR_INPUT%/*}"
 MASK=$(python3 - "$REMOTE_CIDR_INPUT" <<'PY'
 import ipaddress, sys
 n = ipaddress.IPv4Network(sys.argv[1], strict=False)
@@ -61,40 +61,40 @@ PY
 )
 
 set +e
-grep -q "^route ${NET} " "$OVPN_FILE"
+grep -q "^route $${NET} " "$OVPN_FILE"
 HAS_ROUTE=$?
 set -e
 
 if [ $HAS_ROUTE -ne 0 ]; then
-    echo "Adding route ${NET} ${MASK} to client profile for site-to-site..."
+    echo "Adding route $${NET} $${MASK} to client profile for site-to-site..."
     if grep -q "</ca>" "$OVPN_FILE"; then
-        sed -i "/<\\/ca>/i route ${NET} ${MASK}" "$OVPN_FILE"
+        sed -i "/<\\/ca>/i route $${NET} $${MASK}" "$OVPN_FILE"
     elif grep -q "</cert>" "$OVPN_FILE"; then
-        sed -i "/<\\/cert>/i route ${NET} ${MASK}" "$OVPN_FILE"
+        sed -i "/<\\/cert>/i route $${NET} $${MASK}" "$OVPN_FILE"
     else
         echo "" >> "$OVPN_FILE"
-        echo "route ${NET} ${MASK}" >> "$OVPN_FILE"
+        echo "route $${NET} $${MASK}" >> "$OVPN_FILE"
     fi
 fi
 
-mkdir -p /etc/openvpn/client
-cp -f "$OVPN_FILE" "/etc/openvpn/client/${NAME}.conf"
-chmod 600 "/etc/openvpn/client/${NAME}.conf"
+mkdir -p /etc/openvpn
+cp -f "$OVPN_FILE" "/etc/openvpn/$${NAME}.conf"
+chmod 600 "/etc/openvpn/$${NAME}.conf"
 
 echo "Starting OpenVPN client service..."
 if systemctl list-unit-files | grep -q openvpn-client@; then
-    systemctl enable --now "openvpn-client@${NAME}" || true
+    systemctl enable --now "openvpn-client@$${NAME}" || true
 else
-    systemctl enable --now "openvpn@${NAME}" || true
+    systemctl enable --now "openvpn@$${NAME}" || true
 fi
 
 sleep 2
-systemctl status "openvpn-client@${NAME}" --no-pager || systemctl status "openvpn@${NAME}" --no-pager || true
+systemctl status "openvpn-client@$${NAME}" --no-pager || systemctl status "openvpn@$${NAME}" --no-pager || true
 
 echo "==============================================="
-echo "✓ Client installed and started: openvpn-client@${NAME}"
-echo "Check status: systemctl status openvpn-client@${NAME}"
-echo "View logs: journalctl -u openvpn-client@${NAME} -f"
+echo "✓ Client installed and started: openvpn-client@$${NAME}"
+echo "Check status: systemctl status openvpn-client@$${NAME}"
+echo "View logs: journalctl -u openvpn-client@$${NAME} -f"
 echo "==============================================="
 CLIENT_INSTALL_EOF
 
