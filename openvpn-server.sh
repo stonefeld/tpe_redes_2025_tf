@@ -21,7 +21,7 @@ apt-get update
 apt-get upgrade -y
 
 echo "Installing OpenVPN server dependencies..."
-apt-get install -y openvpn easy-rsa nginx apache2-utils python3 iptables-persistent || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y openvpn easy-rsa nginx apache2-utils python3 iptables-persistent || true
 
 # Enable IP forwarding and basic NAT for VPN pool
 echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
@@ -40,18 +40,37 @@ cat > /etc/nginx/sites-available/ovpn << 'EOF'
 server {
     listen 80;
     server_name _;
+    keepalive_timeout 0;
 
     # Redirect root to /download/
     location = / { return 302 /download/; }
 
     # Protected download path: /download/<username>/<file>.ovpn
-    location ~ ^/download/([^/]+)/(.+\.ovpn)$ {
-        alias /var/www/ovpn-export/$1/$2;
+    # Enforce that the authenticated user matches <username> in the URL,
+    # but only AFTER the client has sent Authorization (to ensure prompt first).
+    location ~ ^/download/(?<user>[^/]+)/(?<file>.+\.ovpn)$ {
         auth_basic "Ovpn Download";
         auth_basic_user_file /etc/nginx/.ovpn_htpasswd;
+
+        # Only evaluate mismatch after Authorization header is present
+        set $deny_mismatch 0;
+        if ($http_authorization != "") { set $deny_mismatch 1; }
+        if ($remote_user = $user) { set $deny_mismatch 0; }
+        if ($deny_mismatch = 1) { return 403; }
+
+        alias /var/www/ovpn-export/$user/$file;
         autoindex off;
+        add_header Cache-Control "no-store" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
         limit_except GET HEAD { deny all; }
         access_log /var/log/nginx/ovpn_downloads.log;
+    }
+
+    # Best-effort logout endpoint: prompts browser to clear cached Basic auth
+    location = /logout {
+        return 401;
+        add_header WWW-Authenticate 'Basic realm="Logged Out", charset="UTF-8"' always;
     }
 }
 EOF
@@ -161,12 +180,12 @@ chmod 644 "/etc/openvpn/ccd/$PEER_CN"
 cat > /root/ovpn-export << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ $# -ne 2 ]; then
-  echo "Usage: $0 <client-name> <username>" >&2
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <client-name>" >&2
   exit 1
 fi
 CLIENT="$1"
-USER_NAME="$2"
+USER_NAME="$CLIENT"
 SRC="/root/$CLIENT.ovpn"
 DEST_DIR="/var/www/ovpn-export/$USER_NAME"
 DEST="$DEST_DIR/$CLIENT.ovpn"
@@ -180,9 +199,20 @@ chmod 750 "$DEST_DIR"
 cp -f "$SRC" "$DEST"
 chown root:www-data "$DEST"
 chmod 640 "$DEST"
+# Ensure Basic Auth password exists and rotate to a new random one
+PASSWORD=$(openssl rand -base64 12)
+if [ ! -f /etc/nginx/.ovpn_htpasswd ]; then
+  htpasswd -b -c /etc/nginx/.ovpn_htpasswd "$USER_NAME" "$PASSWORD"
+else
+  htpasswd -b /etc/nginx/.ovpn_htpasswd "$USER_NAME" "$PASSWORD"
+fi
+
 PUBLIC_IP=$(curl -s ipinfo.io/ip || echo "<IP_O_DOMINIO>")
-echo "Archivo exportado: /download/$USER_NAME/$CLIENT.ovpn"
-echo "URL: http://$PUBLIC_IP/download/$USER_NAME/$CLIENT.ovpn"
+echo "==============================================="
+echo "Usuario: $USER_NAME"
+echo "Password: $PASSWORD"
+echo "Link: http://$PUBLIC_IP/download/$USER_NAME/$CLIENT.ovpn"
+echo "==============================================="
 EOF
 
 chmod +x /root/ovpn-export
@@ -233,14 +263,7 @@ CLIENT_CONFIG_EOF
 
 chmod 600 /root/$PEER_CN.ovpn
 
-PASSWORD=$(openssl rand -base64 12)
-if [ ! -f /etc/nginx/.ovpn_htpasswd ]; then
-    htpasswd -b -c /etc/nginx/.ovpn_htpasswd "$PEER_CN" "$PASSWORD"
-else
-    htpasswd -b /etc/nginx/.ovpn_htpasswd "$PEER_CN" "$PASSWORD"
-fi
-
-/root/ovpn-export "$PEER_CN" "$PEER_CN"
+/root/ovpn-export "$PEER_CN"
 
 # Create client-setup-auto.sh for regular client-to-site users
 cat > /root/client-setup-auto.sh << 'CLIENT_AUTO_EOF'
@@ -282,18 +305,7 @@ $(cat /etc/openvpn/ta.key)
 </tls-auth>
 CLIENT_CONFIG_EOF
 chmod 600 /root/$CLIENT_NAME.ovpn
-PASSWORD=$(openssl rand -base64 12)
-if [ ! -f /etc/nginx/.ovpn_htpasswd ]; then
-    htpasswd -b -c /etc/nginx/.ovpn_htpasswd "$CLIENT_NAME" "$PASSWORD"
-else
-    htpasswd -b /etc/nginx/.ovpn_htpasswd "$CLIENT_NAME" "$PASSWORD"
-fi
-/root/ovpn-export "$CLIENT_NAME" "$CLIENT_NAME"
-echo "==============================================="
-echo "Usuario: $CLIENT_NAME"
-echo "Password: $PASSWORD"
-echo "Link: http://$PUBLIC_IP/download/$CLIENT_NAME/$CLIENT_NAME.ovpn"
-echo "==============================================="
+/root/ovpn-export "$CLIENT_NAME"
 CLIENT_AUTO_EOF
 
 chmod +x /root/client-setup-auto.sh
