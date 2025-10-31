@@ -1,3 +1,7 @@
+locals {
+  openvpn_user_data_template = var.lan_role == "server" ? "${path.module}/openvpn-server.sh" : "${path.module}/openvpn-client.sh"
+}
+
 # Security group for OpenVPN server
 resource "aws_security_group" "openvpn" {
   name_prefix = "${var.project_name}-openvpn-"
@@ -19,12 +23,31 @@ resource "aws_security_group" "openvpn" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Nginx access
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # All outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow all traffic from remote LAN CIDR for site-to-site
+  dynamic "ingress" {
+    for_each = var.enable_site_to_site ? [1] : []
+    content {
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = [var.remote_cidr]
+    }
   }
 
   tags = {
@@ -46,9 +69,13 @@ resource "aws_instance" "openvpn" {
   vpc_security_group_ids      = [aws_security_group.openvpn.id]
   subnet_id                   = module.vpc.public_subnets[0]
   associate_public_ip_address = true
+  source_dest_check           = false
 
-  user_data_base64 = base64encode(templatefile("${path.module}/openvpn-setup.sh", {
-    project_name = var.project_name
+  user_data_base64 = base64encode(templatefile(local.openvpn_user_data_template, {
+    project_name             = var.project_name,
+    local_cidr               = var.vpc_cidr,
+    remote_cidr              = var.remote_cidr,
+    peer_gateway_common_name = var.peer_gateway_common_name
   }))
 
   tags = {
@@ -56,4 +83,14 @@ resource "aws_instance" "openvpn" {
   }
 }
 
+# Route remote LAN CIDR to the OpenVPN gateway ENI from the private route table (site-to-site)
+data "aws_network_interface" "openvpn_primary_eni" {
+  id = aws_instance.openvpn.primary_network_interface_id
+}
 
+resource "aws_route" "private_to_remote_over_vpn" {
+  count                  = var.enable_site_to_site ? 1 : 0
+  route_table_id         = module.vpc.private_route_table_ids[0]
+  destination_cidr_block = var.remote_cidr
+  network_interface_id   = data.aws_network_interface.openvpn_primary_eni.id
+}

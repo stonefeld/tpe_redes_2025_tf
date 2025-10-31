@@ -1,0 +1,9 @@
+ssh_public_key_path      = "./id_rsa.pub"
+ssh_private_key_path     = "./id_rsa"
+remote_cidr              = "10.0.0.0/16"
+vpc_cidr                 = "10.2.0.0/16"
+public_subnets           = ["10.2.1.0/24"]
+private_subnets          = ["10.2.2.0/24"]
+lan_role                 = "client"
+peer_gateway_common_name = "lan-a-gw"
+enable_site_to_site      = true
