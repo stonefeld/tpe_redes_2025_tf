@@ -107,6 +107,14 @@ ifconfig-pool-persist ipp.txt
 topology subnet
 client-config-dir /etc/openvpn/ccd
 
+# Push VPC CIDR route to all client-to-site users (for kubectl access)
+#push "route $${LOCAL_CIDR%/*} $(python3 - "$LOCAL_CIDR" <<'PY'
+#import ipaddress, sys
+#n = ipaddress.IPv4Network(sys.argv[1], strict=False)
+#print(n.netmask)
+#PY
+#)"
+
 keepalive 10 120
 user nobody
 group nogroup

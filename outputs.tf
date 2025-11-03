@@ -1,4 +1,3 @@
-# OpenVPN Server Outputs
 output "openvpn_public_ip" {
   description = "Public IP address of the OpenVPN server"
   value       = aws_instance.openvpn.public_ip
@@ -11,20 +10,25 @@ output "openvpn_public_dns" {
 
 output "ssh_connection_command" {
   description = "SSH command to connect to the OpenVPN server"
-  value       = "ssh -i ${var.ssh_private_key_path} ubuntu@${aws_instance.openvpn.public_ip}"
+  value       = "ssh ubuntu@${aws_instance.openvpn.public_ip}"
 }
 
-output "ssh_key_name" {
-  description = "Name of the AWS key pair used for SSH access"
-  value       = aws_key_pair.openvpn.key_name
+output "ssh_agent_command" {
+  description = "Add the private key to the SSH agent"
+  value       = "ssh-add ${var.ssh_private_key_path}"
 }
 
-output "openvpn_port" {
-  description = "OpenVPN server port"
-  value       = "1194"
+output "private_ec2_private_ip" {
+  description = "Private IP address of the private EC2 instance"
+  value       = aws_instance.private_ec2.private_ip
 }
 
-output "openvpn_protocol" {
-  description = "OpenVPN protocol"
-  value       = "UDP"
+output "private_ec2_private_dns" {
+  description = "Private DNS name of the private EC2 instance"
+  value       = aws_instance.private_ec2.private_dns
+}
+
+output "private_ec2_ssh_command" {
+  description = "SSH command to connect to the private EC2 instance"
+  value       = "ssh -J ubuntu@${aws_instance.openvpn.public_ip} ubuntu@${aws_instance.private_ec2.private_ip}"
 }

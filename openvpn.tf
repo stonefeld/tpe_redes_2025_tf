@@ -50,6 +50,14 @@ resource "aws_security_group" "openvpn" {
     }
   }
 
+  # Allow all traffic from private subnet (for VPN site-to-site routing)
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = var.private_subnets
+  }
+
   tags = {
     Name = "${var.project_name}-openvpn-sg"
   }
@@ -64,7 +72,7 @@ resource "aws_key_pair" "openvpn" {
 # EC2 instance for OpenVPN server
 resource "aws_instance" "openvpn" {
   ami                         = "ami-0360c520857e3138f" # Ubuntu 24.04 LTS
-  instance_type               = "t3.micro"
+  instance_type               = "t2.micro"
   key_name                    = aws_key_pair.openvpn.key_name
   vpc_security_group_ids      = [aws_security_group.openvpn.id]
   subnet_id                   = module.vpc.public_subnets[0]
@@ -94,3 +102,4 @@ resource "aws_route" "private_to_remote_over_vpn" {
   destination_cidr_block = var.remote_cidr
   network_interface_id   = data.aws_network_interface.openvpn_primary_eni.id
 }
+
