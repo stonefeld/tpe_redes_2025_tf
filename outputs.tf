@@ -8,6 +8,11 @@ output "openvpn_public_dns" {
   value       = aws_instance.openvpn.public_dns
 }
 
+output "openvpn_private_ip" {
+  description = "Private IP address of the OpenVPN server"
+  value       = aws_instance.openvpn.private_ip
+}
+
 output "ssh_connection_command" {
   description = "SSH command to connect to the OpenVPN server"
   value       = "ssh ubuntu@${aws_instance.openvpn.public_ip}"

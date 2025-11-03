@@ -84,7 +84,7 @@ rm -f kubectl kubectl.sha256
 # Clone the repository
 echo "Cloning repository..."
 cd /home/ubuntu
-sudo -u ubuntu git clone https://github.com/jupmoreno/the-store.git || true
+sudo -u ubuntu git clone https://github.com/stonefeld/tpe_redes_2025_tf.git || true
 
 # Set ownership
 chown -R ubuntu:ubuntu /home/ubuntu/the-store

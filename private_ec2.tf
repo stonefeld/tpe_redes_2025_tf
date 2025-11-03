@@ -9,29 +9,39 @@ resource "aws_security_group" "private_ec2" {
     cidr_blocks = [var.vpc_cidr]
   }
 
+  # Allow all traffic from client-to-site VPN subnet
   ingress {
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["10.8.0.0/24"]
   }
 
+  # Allow all traffic from remote site-to-site subnet
   ingress {
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.remote_cidr]
+  }
+
+  # Allow ICMP (ping) from VPC
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = [var.vpc_cidr]
   }
 
-  dynamic "ingress" {
-    for_each = var.enable_site_to_site ? [1] : []
-    content {
-      from_port   = 6443
-      to_port     = 6443
-      protocol    = "tcp"
-      cidr_blocks = [var.remote_cidr]
-    }
-  }
+  # dynamic "ingress" {
+  #   for_each = var.enable_site_to_site ? [1] : []
+  #   content {
+  #     from_port   = 0
+  #     to_port     = 0
+  #     protocol    = "-1"
+  #     cidr_blocks = [var.remote_cidr]
+  #   }
+  # }
 
   egress {
     from_port   = 0
@@ -47,11 +57,18 @@ resource "aws_security_group" "private_ec2" {
 
 resource "aws_instance" "private_ec2" {
   ami                         = "ami-0360c520857e3138f"
-  instance_type               = "t3.medium"
+  instance_type               = "t3.large"
   key_name                    = aws_key_pair.openvpn.key_name
   vpc_security_group_ids      = [aws_security_group.private_ec2.id]
   subnet_id                   = module.vpc.private_subnets[0]
   associate_public_ip_address = false
+
+  root_block_device {
+    volume_size           = 50   # GiB
+    volume_type           = "gp3"
+    delete_on_termination = true
+    encrypted             = true
+  }
 
   user_data = file("${path.module}/setup-the-store.sh")
 

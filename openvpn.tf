@@ -58,6 +58,14 @@ resource "aws_security_group" "openvpn" {
     cidr_blocks = var.private_subnets
   }
 
+  # Allow all traffic from VPN client subnet (10.8.0.0/24) for client-to-site
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.8.0.0/24"]
+  }
+
   tags = {
     Name = "${var.project_name}-openvpn-sg"
   }
@@ -100,6 +108,13 @@ resource "aws_route" "private_to_remote_over_vpn" {
   count                  = var.enable_site_to_site ? 1 : 0
   route_table_id         = module.vpc.private_route_table_ids[0]
   destination_cidr_block = var.remote_cidr
+  network_interface_id   = data.aws_network_interface.openvpn_primary_eni.id
+}
+
+# Route VPN client subnet (10.8.0.0/24) through OpenVPN server for client-to-site access
+resource "aws_route" "private_to_vpn_clients" {
+  route_table_id         = module.vpc.private_route_table_ids[0]
+  destination_cidr_block = "10.8.0.0/24"
   network_interface_id   = data.aws_network_interface.openvpn_primary_eni.id
 }
 

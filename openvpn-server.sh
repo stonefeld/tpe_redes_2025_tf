@@ -107,13 +107,9 @@ ifconfig-pool-persist ipp.txt
 topology subnet
 client-config-dir /etc/openvpn/ccd
 
-# Push VPC CIDR route to all client-to-site users (for kubectl access)
-#push "route $${LOCAL_CIDR%/*} $(python3 - "$LOCAL_CIDR" <<'PY'
-#import ipaddress, sys
-#n = ipaddress.IPv4Network(sys.argv[1], strict=False)
-#print(n.netmask)
-#PY
-#)"
+# Push VPC CIDR route to all client-to-site users (for kubectl access and VPC access)
+# The actual 'push route' line is appended below the heredoc so variables are expanded
+#push "route $${LOCAL_CIDR%/*} <NETMASK>"
 
 keepalive 10 120
 user nobody
@@ -125,6 +121,15 @@ status openvpn-status.log
 verb 3
 explicit-exit-notify 1
 EOF
+
+# After writing server.conf above, compute the netmask for LOCAL_CIDR and append the push route
+NETMASK=$(python3 - "$LOCAL_CIDR" <<'PY'
+import ipaddress, sys
+n = ipaddress.IPv4Network(sys.argv[1], strict=False)
+print(n.netmask)
+PY
+)
+grep -q "^push \"route $${LOCAL_CIDR%/*} $NETMASK\"$" /etc/openvpn/server.conf || echo "push \"route $${LOCAL_CIDR%/*} $NETMASK\"" >> /etc/openvpn/server.conf
 
 mkdir -p /etc/openvpn/ccd
 chmod 755 /etc/openvpn/ccd
