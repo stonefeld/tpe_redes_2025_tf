@@ -91,7 +91,8 @@ resource "aws_instance" "openvpn" {
     project_name             = var.project_name,
     local_cidr               = var.vpc_cidr,
     remote_cidr              = var.remote_cidr,
-    peer_gateway_common_name = var.peer_gateway_common_name
+    peer_gateway_common_name = var.peer_gateway_common_name,
+    cluster_private_ip       = aws_instance.cluster.private_ip
   }))
 
   tags = {

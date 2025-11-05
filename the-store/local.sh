@@ -40,11 +40,11 @@ check_prerequisites() {
     fi
     print_success "Kind is installed"
 
-    if ! command -v kubectl &> /dev/null; then
-        print_error "Kubectl is not installed. Please install kubectl first."
+    if ! command -v kubectl --insecure-skip-tls-verify=true &> /dev/null; then
+        print_error "kubectl is not installed. Please install kubectl."
         exit 1
     fi
-    print_success "Kubectl is installed"
+    print_success "kubectl is installed"
 }
 
 create_cluster_and_deploy() {
@@ -76,6 +76,7 @@ create_cluster() {
 
     if ! kind get clusters | grep -q "^$CLUSTER_NAME$"; then
         print_status "Creating new Kind cluster '$CLUSTER_NAME'..."
+        HOST_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "")
 
         cat <<EOF | kind create cluster --name $CLUSTER_NAME --config -
 kind: Cluster
@@ -88,12 +89,23 @@ nodes:
     nodeRegistration:
       kubeletExtraArgs:
         node-labels: "ingress-ready=true"
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      certSANs:
+      - "127.0.0.1"
+      - "localhost"
+      - "$HOST_IP"
   extraPortMappings:
   - containerPort: 80
     hostPort: 80
     protocol: TCP
   - containerPort: 443
     hostPort: 443
+    protocol: TCP
+  - containerPort: 6443
+    hostPort: 6443
+    listenAddress: "0.0.0.0"
     protocol: TCP
 EOF
 
@@ -103,16 +115,16 @@ EOF
     fi
 
     print_status "Waiting for cluster to be ready..."
-    kubectl wait --for=condition=Ready nodes --all --timeout=300s
+    kubectl --insecure-skip-tls-verify=true wait --for=condition=Ready nodes --all --timeout=300s
     print_success "Cluster is ready"
 }
 
 install_ingress() {
-    if ! kubectl get namespace ingress-nginx &> /dev/null; then
+    if ! kubectl --insecure-skip-tls-verify=true get namespace ingress-nginx &> /dev/null; then
         print_status "Installing nginx ingress controller..."
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.1/deploy/static/provider/kind/deploy.yaml
+        kubectl --insecure-skip-tls-verify=true apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.1/deploy/static/provider/kind/deploy.yaml
         print_status "Waiting for nginx ingress controller to be ready..."
-        kubectl wait --namespace ingress-nginx \
+        kubectl --insecure-skip-tls-verify=true wait --namespace ingress-nginx \
             --for=condition=ready pod \
             --selector=app.kubernetes.io/component=controller \
             --timeout=300s
@@ -143,36 +155,36 @@ load_images() {
 }
 
 deploy_services() {
-    if kubectl get namespace $NAMESPACE &> /dev/null; then
+    if kubectl --insecure-skip-tls-verify=true get namespace $NAMESPACE &> /dev/null; then
         print_warning "Namespace '$NAMESPACE' already exists"
         read -p "Do you want to delete the namespace and all related resources? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             print_status "Deleting namespace '$NAMESPACE' and all resources..."
-            kubectl delete namespace $NAMESPACE
+            kubectl --insecure-skip-tls-verify=true delete namespace $NAMESPACE
             print_status "Waiting for namespace deletion to complete..."
-            kubectl wait --for=delete namespace/$NAMESPACE --timeout=300s
+            kubectl --insecure-skip-tls-verify=true wait --for=delete namespace/$NAMESPACE --timeout=300s
             print_success "Namespace '$NAMESPACE' deleted successfully"
         else
             print_status "Using existing namespace '$NAMESPACE'"
         fi
     fi
 
-    if ! kubectl get namespace $NAMESPACE &> /dev/null; then
+    if ! kubectl --insecure-skip-tls-verify=true get namespace $NAMESPACE &> /dev/null; then
         print_status "Creating namespace '$NAMESPACE'..."
-        kubectl create namespace $NAMESPACE
+        kubectl --insecure-skip-tls-verify=true create namespace $NAMESPACE
         print_success "Namespace '$NAMESPACE' is ready"
     fi
 
     print_status "Applying Kubernetes manifests to namespace '$NAMESPACE'..."
-    kubectl apply -f $DIR/dist/kubernetes.yaml -n $NAMESPACE
+    kubectl --insecure-skip-tls-verify=true apply -f $DIR/dist/kubernetes.yaml -n $NAMESPACE
 
     print_status "Waiting for all deployments to be available..."
-    kubectl wait --namespace $NAMESPACE --for=condition=available deployments --timeout=300s --all
+    kubectl --insecure-skip-tls-verify=true wait --namespace $NAMESPACE --for=condition=available deployments --timeout=300s --all
     print_success "All deployments are available"
 
     print_status "Waiting for all pods to be ready and running..."
-    kubectl wait --namespace $NAMESPACE --for=condition=ready pods --timeout=300s --all
+    kubectl --insecure-skip-tls-verify=true wait --namespace $NAMESPACE --for=condition=ready pods --timeout=300s --all
     print_success "All pods are ready and running"
 }
 
@@ -183,30 +195,30 @@ show_status() {
         kind get clusters
         echo ""
         print_status "Node Status:"
-        kubectl get nodes
+        kubectl --insecure-skip-tls-verify=true get nodes
         echo ""
 
-        if kubectl get namespace ingress-nginx &> /dev/null; then
+        if kubectl --insecure-skip-tls-verify=true get namespace ingress-nginx &> /dev/null; then
             print_status "Ingress Controller Status:"
-            kubectl get all -n ingress-nginx
+            kubectl --insecure-skip-tls-verify=true get all -n ingress-nginx
             echo ""
         else
             print_warning "Ingress Controller is not installed"
         fi
 
-        # if kubectl get namespace metallb-system &> /dev/null; then
+        # if kubectl --insecure-skip-tls-verify=true get namespace metallb-system &> /dev/null; then
         #     print_status "MetalLB Status:"
-        #     kubectl get all -n metallb-system
+        #     kubectl --insecure-skip-tls-verify=true get all -n metallb-system
         #     echo ""
         #     print_status "IP Address Pools:"
-        #     kubectl get ipaddresspools -n metallb-system
+        #     kubectl --insecure-skip-tls-verify=true get ipaddresspools -n metallb-system
         # else
         #     print_warning "MetalLB is not installed"
         # fi
 
-        if kubectl get namespace $NAMESPACE &> /dev/null; then
+        if kubectl --insecure-skip-tls-verify=true get namespace $NAMESPACE &> /dev/null; then
             print_status "Service Status:"
-            kubectl get all -n $NAMESPACE
+            kubectl --insecure-skip-tls-verify=true get all -n $NAMESPACE
         else
             print_warning "No $NAMESPACE namespace found"
         fi
@@ -291,12 +303,12 @@ cmd_e2e_tests() {
         exit 1
     fi
 
-    if ! kubectl get namespace $NAMESPACE &> /dev/null; then
+    if ! kubectl --insecure-skip-tls-verify=true get namespace $NAMESPACE &> /dev/null; then
         print_error "Namespace '$NAMESPACE' does not exist. Please deploy services first with 'create-cluster' command."
         exit 1
     fi
 
-    if ! kubectl wait --namespace $NAMESPACE --for=condition=available deployments --timeout=30s --all &> /dev/null; then
+    if ! kubectl --insecure-skip-tls-verify=true wait --namespace $NAMESPACE --for=condition=available deployments --timeout=30s --all &> /dev/null; then
         print_error "Services are not running. Please ensure all deployments are available."
         exit 1
     fi
@@ -312,12 +324,12 @@ cmd_load_generator() {
         exit 1
     fi
 
-    if ! kubectl get namespace $NAMESPACE &> /dev/null; then
+    if ! kubectl --insecure-skip-tls-verify=true get namespace $NAMESPACE &> /dev/null; then
         print_error "Namespace '$NAMESPACE' does not exist. Please deploy services first with 'create-cluster' command."
         exit 1
     fi
 
-    if ! kubectl wait --namespace $NAMESPACE --for=condition=available deployments --timeout=30s --all &> /dev/null; then
+    if ! kubectl --insecure-skip-tls-verify=true wait --namespace $NAMESPACE --for=condition=available deployments --timeout=30s --all &> /dev/null; then
         print_error "Services are not running. Please ensure all deployments are available."
         exit 1
     fi

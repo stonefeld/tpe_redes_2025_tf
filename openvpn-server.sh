@@ -8,12 +8,14 @@ set -e
 LOCAL_CIDR="${local_cidr}"
 REMOTE_CIDR="${remote_cidr}"
 PEER_CN="${peer_gateway_common_name}"
+CLUSTER_IP="${cluster_private_ip}"
 
 echo "==============================================="
 echo "OpenVPN Server Setup"
 echo "Local CIDR: $LOCAL_CIDR"
 echo "Remote CIDR: $REMOTE_CIDR"
 echo "Peer CN: $PEER_CN"
+echo "Cluster IP: $CLUSTER_IP"
 echo "==============================================="
 
 echo "Updating system packages..."
@@ -35,15 +37,12 @@ mkdir -p /var/www/ovpn-export
 chown root:www-data /var/www/ovpn-export
 chmod 750 /var/www/ovpn-export
 
-# Configure Nginx site for protected downloads
-cat > /etc/nginx/sites-available/ovpn << 'EOF'
+# Configure Nginx site for protected downloads and store frontend
+cat > /etc/nginx/sites-available/ovpn << NGINX_EOF
 server {
     listen 80;
     server_name _;
     keepalive_timeout 0;
-
-    # Redirect root to /download/
-    location = / { return 302 /download/; }
 
     # Protected download path: /download/<username>/<file>.ovpn
     # Enforce that the authenticated user matches <username> in the URL,
@@ -53,12 +52,12 @@ server {
         auth_basic_user_file /etc/nginx/.ovpn_htpasswd;
 
         # Only evaluate mismatch after Authorization header is present
-        set $deny_mismatch 0;
-        if ($http_authorization != "") { set $deny_mismatch 1; }
-        if ($remote_user = $user) { set $deny_mismatch 0; }
-        if ($deny_mismatch = 1) { return 403; }
+        set \$deny_mismatch 0;
+        if (\$http_authorization != "") { set \$deny_mismatch 1; }
+        if (\$remote_user = \$user) { set \$deny_mismatch 0; }
+        if (\$deny_mismatch = 1) { return 403; }
 
-        alias /var/www/ovpn-export/$user/$file;
+        alias /var/www/ovpn-export/\$user/\$file;
         autoindex off;
         add_header Cache-Control "no-store" always;
         add_header Pragma "no-cache" always;
@@ -72,8 +71,29 @@ server {
         return 401;
         add_header WWW-Authenticate 'Basic realm="Logged Out", charset="UTF-8"' always;
     }
+
+    # Proxy all other paths (including /store, /assets, etc.) to Kubernetes cluster
+    # This catch-all must come after the /download location block
+    location / {
+        proxy_pass http://$CLUSTER_IP;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_redirect off;
+
+        # WebSocket support (if needed)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
 }
-EOF
+NGINX_EOF
 
 ln -sf /etc/nginx/sites-available/ovpn /etc/nginx/sites-enabled/ovpn
 [ -f /etc/nginx/sites-enabled/default ] && rm -f /etc/nginx/sites-enabled/default
@@ -358,6 +378,7 @@ OpenVPN Server Setup Complete (LAN A)
 ✓ Server running
 ✓ Site-to-site configured for $PEER_CN → $REMOTE_CIDR
 ✓ Gateway certificate exported: http://$PUBLIC_IP/download/$PEER_CN/$PEER_CN.ovpn
+✓ Store frontend available at: http://$PUBLIC_IP/store/
 
 Client-to-site:
 - Use: sudo /root/client-setup-auto.sh <client-name>

@@ -656,11 +656,12 @@ metadata:
     app.kubernetes.io/owner: retail-store-sample
     app.kubernetes.io/managed-by: Helm
   annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
     kubernetes.io/ingress.class: nginx
 spec:
+  ingressClassName: nginx
   rules:
-    - host: "localhost"
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix

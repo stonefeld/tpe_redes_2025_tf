@@ -23,17 +23,17 @@ output "ssh_agent_command" {
   value       = "ssh-add ${var.ssh_private_key_path}"
 }
 
-output "private_ec2_private_ip" {
+output "cluster_private_ip" {
   description = "Private IP address of the private EC2 instance"
-  value       = aws_instance.private_ec2.private_ip
+  value       = aws_instance.cluster.private_ip
 }
 
-output "private_ec2_private_dns" {
+output "cluster_private_dns" {
   description = "Private DNS name of the private EC2 instance"
-  value       = aws_instance.private_ec2.private_dns
+  value       = aws_instance.cluster.private_dns
 }
 
-output "private_ec2_ssh_command" {
+output "cluster_ssh_command" {
   description = "SSH command to connect to the private EC2 instance"
-  value       = "ssh -J ubuntu@${aws_instance.openvpn.public_ip} ubuntu@${aws_instance.private_ec2.private_ip}"
+  value       = "ssh -J ubuntu@${aws_instance.openvpn.public_ip} ubuntu@${aws_instance.cluster.private_ip}"
 }

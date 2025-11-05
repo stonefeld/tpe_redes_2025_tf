@@ -1,4 +1,4 @@
-resource "aws_security_group" "private_ec2" {
+resource "aws_security_group" "cluster" {
   name_prefix = "${var.project_name}-private-ec2-"
   vpc_id      = module.vpc.vpc_id
 
@@ -55,11 +55,11 @@ resource "aws_security_group" "private_ec2" {
   }
 }
 
-resource "aws_instance" "private_ec2" {
+resource "aws_instance" "cluster" {
   ami                         = "ami-0360c520857e3138f"
-  instance_type               = "t3.large"
+  instance_type               = "t2.medium"
   key_name                    = aws_key_pair.openvpn.key_name
-  vpc_security_group_ids      = [aws_security_group.private_ec2.id]
+  vpc_security_group_ids      = [aws_security_group.cluster.id]
   subnet_id                   = module.vpc.private_subnets[0]
   associate_public_ip_address = false
 
